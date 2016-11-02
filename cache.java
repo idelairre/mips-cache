@@ -1,36 +1,64 @@
-import java.util.Collections;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Scanner;
 
-// You will implement a direct-mapped, write-back cache.
+/*
+  -----------------------------------
+  |   Tag   | Slot # | Block Offset |
+  -----------------------------------
+  |  28 bits | 4 bits |    4 bits   |
+  -----------------------------------
+*/
+
+class Address {
+  public int raw;
+  public int offset;
+  public int beginAddress;
+  public int tag;
+  public int slot;
+
+  public Address(int address) {
+    this.raw = address;
+    this.offset = address & 0xF;
+    this.beginAddress = address & 0xFFF0;
+    this.tag = address >>> 8;
+    this.slot = (address & 0xF0) >>> 4;
+  }
+}
 
 class Block {
   short slot;
+  int dirty;
   int valid;
   int tag;
   short[] data = new short[16];
 
   public Block(short slotNum) {
-    slot = slotNum;
-    Arrays.fill(data, (short) 0);
+    this.slot = slotNum;
+    Arrays.fill(this.data, (short) 0);
   }
 
-  public void set(int cacheTag, short[] cacheData) {
-    tag = cacheTag;
-    valid = 1;
-    setData(cacheData);
-  }
-
-  private void setData(short[] cacheData) {
+  public void loadMemory(Address address, short[] cacheData) {
+    this.tag = address.tag;
+    this.valid = 1;
     for (short i = 0; i < cacheData.length; i++) {
-      data[i] = cacheData[i];
+      this.data[i] = cacheData[i];
     }
   }
 
-  private String dataToString() {
+  public void update(int offset, short data) {
+    this.data[offset] = data;
+  }
+
+  public String dataToString() {
     String array = "";
-    for (short i = 0; i < data.length; i++) {
-      array += Integer.toHexString(data[i]);
-      if (i != data.length - 1) {
+    for (short i = 0; i < this.data.length; i++) {
+      if (Integer.toHexString(this.data[i]).length() != 2) {
+        array += " " + Integer.toHexString(this.data[i]);
+      } else {
+        array += Integer.toHexString(this.data[i]);
+      }
+      if (i != this.data.length - 1) {
         array += ", ";
       }
     }
@@ -38,7 +66,7 @@ class Block {
   }
 
   public String toString() {
-    return Integer.toHexString(slot) + "    " + valid + "     " + tag + "       " + dataToString();
+    return Integer.toHexString(this.slot) + "    " + this.valid + "     " + this.tag + "       " + this.dataToString();
   }
 }
 
@@ -53,7 +81,7 @@ class Cache {
   }
 
   static {
-    for (short i = 0, j = 0; i < mainMemory.length - 1; i++, j++) {
+    for (short i = 0, j = 0; i < mainMemory.length; i++, j++) {
       if (j == (0xFF + 1)) {
         j = 0;
       }
@@ -61,38 +89,154 @@ class Cache {
     }
   }
 
-  private static Block get(int slot) {
+  private static int decodeHex(String input) {
+    if (!input.contains("0x")) {
+      input = "0x" + input;
+    }
+    return Integer.decode(input);
+  }
+
+  private static String mainMemoryToString(int beginAddress, int endAddress) {
+    short[] array = Arrays.copyOfRange(mainMemory, beginAddress, endAddress);
+    String output = "";
+    for (int i = 0; i < array.length; i++) {
+      output += Integer.toHexString(array[i]);
+      if (i != array.length - 1) {
+        output += ", ";
+      }
+    }
+    return output;
+  }
+
+  private static Block getBlock(int slot) {
     return blocks[slot];
   }
 
-/*
-  -----------------------------------
-  |   Tag   | Slot # | Block Offset |
-  -----------------------------------
-  |  4 bits | 4 bits |   4 bits     |
-  -----------------------------------
-*/
+  private static short[] getRow(int beginAddress) {
+    return Arrays.copyOfRange(mainMemory, beginAddress, beginAddress + 16);
+  }
 
-  public static void read(int address) {
-    boolean cacheHit = false;
+  private static void runTests() {
+    Block block = getBlock(0xa);
+    block.loadMemory(new Address(0x7a0), getRow(0x7a0));
+    read(parseAddress(0x7ae));
+    read(parseAddress(0x2e));
+    read(parseAddress(0x2f));
+    read(parseAddress(0x3d5));
+    displayCache();
+  }
 
-    int blockOffset = address & 0xF;
-    int blockBeginAddress = address & 0xFFF0;
-    int tag = address >>> 8;
-    int slotNum = (address & 0xF0) >>> 4;
+  private static void run() {
+    read(parseAddress(0x5));
+    read(parseAddress(0x6));
+    read(parseAddress(0x7));
+    read(parseAddress(0x14c));
+    read(parseAddress(0x14d));
+    read(parseAddress(0x14e));
+    read(parseAddress(0x14f));
+    read(parseAddress(0x150));
+    read(parseAddress(0x151));
+    read(parseAddress(0x3a6));
+    read(parseAddress(0x4c3));
+    displayCache();
+    write(parseAddress(0x14c), (short) 99);
+    write(parseAddress(0x63b), (short) 7);
+    read(parseAddress(0x582));
+    read(parseAddress(0x348));
+    read(parseAddress(0x3F));
+    displayCache();
+    read(parseAddress(0x14b));
+    read(parseAddress(0x14c));
+    read(parseAddress(0x63f));
+    read(parseAddress(0x83));
+    displayCache();
+  }
 
-    if (cacheHit) {
+  private static boolean isCacheHit(Address address) {
+    Block block = getBlock(address.slot);
+    if (block.valid == 1 && block.tag == address.tag) {
+      return true;
+    }
+    return false;
+  }
 
-    } else {
-      Block block = get(slotNum);
-      short[] cacheData = Arrays.copyOfRange(mainMemory, blockBeginAddress, blockBeginAddress + 16);
-      block.set(tag, cacheData);
-      System.out.println("address: " + Integer.toHexString(address) + " offset: " + Integer.toHexString(blockOffset) + " begin address: " + Integer.toHexString(blockBeginAddress) + " tag: " + Integer.toHexString(tag) + " slotnum: " + Integer.toHexString(slotNum));
+  private static boolean isDirty(Address address) {
+    Block block = getBlock(address.slot);
+    // System.out.println("Conflict: " + (block.dirty == 1));
+    if (block.dirty == 1) {
+      return true;
+    }
+    return false;
+  }
+
+  private static void writeBack(Address address) {
+    Block block = getBlock(address.slot);
+    Address writeBackAddress = new Address((block.tag << 8) + (block.slot << 4));
+    for (short i = 0; i < block.data.length; i++) {
+      if (mainMemory[writeBackAddress.beginAddress + i] != block.data[i]) {
+        // System.out.println("\nUpdating address " + Integer.toHexString(address.beginAddress + i) + " new val: " + Integer.toHexString(block.data[i]) + ", old val: " + Integer.toHexString(mainMemory[address.beginAddress + i]));
+        mainMemory[writeBackAddress.beginAddress + i] = block.data[i];
+      }
     }
   }
 
-  public static void write(short address, short data) {
+  private static Address parseAddress(int rawAddress) {
+    Address address = new Address(rawAddress);
+    System.out.println(Integer.toHexString(address.raw));
+    // System.out.println("address: " + Integer.toHexString(address.raw) + " offset: " + Integer.toHexString(address.offset) + " begin address: " + Integer.toHexString(address.beginAddress) + " tag: " + Integer.toHexString(address.tag) + " slotnum: " + Integer.toHexString(address.slot));
+    return address;
+  }
 
+  public static void read(Address address) {
+    Block block = getBlock(address.slot);
+    if (isCacheHit(address)) {
+      String storedVal = Integer.toHexString(block.data[address.offset]);
+      System.out.println("At that byte there is the value " + storedVal + " (Cache Hit)");
+    } else {
+      if (isDirty(address)) { // write cache to memory before it is bumped out
+        writeBack(address);
+      }
+      block.loadMemory(address, getRow(address.beginAddress));
+      String storedVal = Integer.toHexString(mainMemory[address.raw]);
+      System.out.println("At that byte there is the value " + storedVal + " (Cache Miss)");
+    }
+  }
+
+  public static void write(Address address, short data) {
+    System.out.println(data);
+    Block block = getBlock(address.slot);
+    block.dirty = 1;
+    if (isCacheHit(address)) {
+      block.update(address.offset, data);
+      System.out.println("Value " + data + " has been written to address " + Integer.toHexString(address.raw) + " (Cache Hit)");
+    } else {
+      if (isDirty(address)) {
+        writeBack(address);
+      }
+      block.loadMemory(address, getRow(address.beginAddress));
+      block.update(address.offset, data);
+      System.out.println("Value " + data + " has been written to address " + Integer.toHexString(address.raw) + " (Cache Miss)");
+    }
+  }
+
+  public static void prompt() {
+    Scanner scanner = new Scanner(System.in);
+    System.out.println("(R)ead, (W)rite, or (D)isplay Cache?");
+    String option = scanner.next();
+    if (option.equals("R")) {
+      String input = scanner.next();
+      int address = Integer.decode(input);
+      read(parseAddress(address));
+    } else if (option.equals("W")) {
+      int address = decodeHex(scanner.next());
+      int data = scanner.nextInt();
+      write(parseAddress(address), (short) data);
+    } else if (option.equals("D")) {
+      displayCache();
+    } else {
+      System.out.println("Invalid input");
+    }
+    prompt();
   }
 
   public static void displayCache() {
@@ -103,10 +247,7 @@ class Cache {
   }
 
   public static void main(String[] args) {
-    // System.out.println(mainMemory[0]);
-    // System.out.println(mainMemory[0xFF]);
-    // System.out.println(mainMemory[0x100]);
-    read(0x7ae);
-    displayCache();
+    // prompt();
+    run();
   }
 }
